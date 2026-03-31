@@ -1,0 +1,9 @@
+/* Add this to the very top of your index.css */
+html, body, #root {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100%;
+  max-width: 100% !important;
+  overflow-x: hidden; /* Prevents annoying horizontal scrollbars */
+  background-color: #fcfcfc; /* Optional: gives a nice soft background */
+}
