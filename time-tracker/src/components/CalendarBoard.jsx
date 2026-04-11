@@ -2,6 +2,8 @@ import React from 'react';
 
 export default function CalendarBoard({
   user,
+  myRole, 
+  payData = {}, // 🚀 NEW: Grabs the full pay package instead of just one rate
   selectedDate, setSelectedDate, setEditingId,
   monthlyEntries, monthlyTotal, targetMonthPrefix,
   todayString, minDateString, 
@@ -19,7 +21,7 @@ export default function CalendarBoard({
   // ==========================================
   const handlePrevMonth = () => {
     const [y, m] = selectedDate.split("-");
-    const prevDate = new Date(y, m - 1 - 1, 1); // Subtract 1 month, default to 1st day
+    const prevDate = new Date(y, m - 1 - 1, 1);
     const newDateStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}-01`;
     setSelectedDate(newDateStr);
     setEditingId(null);
@@ -27,25 +29,43 @@ export default function CalendarBoard({
 
   const handleNextMonth = () => {
     const [y, m] = selectedDate.split("-");
-    const nextDate = new Date(y, m - 1 + 1, 1); // Add 1 month, default to 1st day
+    const nextDate = new Date(y, m - 1 + 1, 1);
     const newDateStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-01`;
     setSelectedDate(newDateStr);
     setEditingId(null);
   };
 
-  // Prevent navigating into the future
   const isViewingCurrentMonth = targetMonthPrefix >= todayString.substring(0, 7);
 
   // ==========================================
-  // 💰 PAY RATE CALCULATION
+  // 💰 SMART PAY RATE CALCULATION
   // ==========================================
-  const HOURLY_RATE = 160; 
-  const estimatedEarnings = monthlyTotal * HOURLY_RATE;
+  let baseRate = payData.raterBaseINR || 0;
+  let bonusRate = payData.raterBonusINR || 0;
+  let currencySymbol = '₹';
+  let isUSD = false;
+
+  // Determine the rate based on who is logged into this account
+  if (myRole === 'leader') {
+    baseRate = payData.leaderBaseINR || 0;
+    bonusRate = payData.leaderBonusINR || 0;
+  } else if (myRole === 'co-admin' || myRole === 'admin') {
+    baseRate = payData.payRateUSD || 0;
+    bonusRate = payData.payRateUSD || 0; // Owners see flat USD
+    currencySymbol = '$';
+    isUSD = true;
+  }
+
+  const threshold = payData.bonusThreshold || 40;
+  const isBonusUnlocked = monthlyTotal >= threshold;
+  const currentRate = isBonusUnlocked ? bonusRate : baseRate;
+  const estimatedEarnings = monthlyTotal * currentRate;
+  const hoursNeededForBonus = Math.max(0, threshold - monthlyTotal);
 
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-IN', {
+    return new Intl.NumberFormat(isUSD ? 'en-US' : 'en-IN', {
       style: 'currency',
-      currency: 'INR',
+      currency: isUSD ? 'USD' : 'INR',
       minimumFractionDigits: 2
     }).format(amount);
   };
@@ -77,7 +97,7 @@ export default function CalendarBoard({
           <h2>Timesheet Report - ${monthName}</h2>
           <p><strong>User:</strong> ${user?.email || 'N/A'}</p>
           <p><strong>Total Hours:</strong> ${monthlyTotal.toFixed(3)}</p>
-          <p><strong>Estimated Pay:</strong> ${formatCurrency(estimatedEarnings)} (at ₹${HOURLY_RATE}/hr)</p>
+          <p><strong>Estimated Pay:</strong> ${formatCurrency(estimatedEarnings)} (at ${currencySymbol}${currentRate}/hr)</p>
           <table>
             <thead>
               <tr>
@@ -130,18 +150,23 @@ export default function CalendarBoard({
     
     const isSelected = dateStr === selectedDate;
     const isToday = dateStr === todayString;
+    
+    const isFuture = dateStr > todayString;
     const isLocked = dateStr < minDateString;
+    const isDisabled = isLocked || isFuture;
 
     return (
       <div 
         key={dayNum} 
-        onClick={() => { setSelectedDate(dateStr); setEditingId(null); }}
+        onClick={isDisabled ? undefined : () => { setSelectedDate(dateStr); setEditingId(null); }}
         style={{ 
-          border: '1px solid #eee', borderRadius: '6px', padding: '8px 4px', textAlign: 'center', cursor: 'pointer',
+          border: '1px solid #eee', borderRadius: '6px', padding: '8px 4px', textAlign: 'center', 
+          cursor: isDisabled ? 'not-allowed' : 'pointer', 
           backgroundColor: isSelected ? '#007BFF' : (isToday ? '#e8f5e9' : '#fff'),
-          color: isSelected ? '#fff' : '#333',
+          color: isSelected ? '#fff' : (isFuture ? '#ccc' : '#333'), 
           boxShadow: isSelected ? '0 4px 10px rgba(0,123,255,0.4)' : 'none',
-          opacity: isLocked ? 0.5 : 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
+          opacity: isDisabled ? 0.5 : 1, 
+          display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
           minHeight: '65px', transition: 'all 0.2s ease-in-out'
         }}
       >
@@ -186,15 +211,30 @@ export default function CalendarBoard({
           </button>
         </div>
         
-        {/* BIG TEXT: Real-time format (19h 16m 44s) */}
+        {/* BIG TEXT: Real-time format */}
         <div style={{ fontSize: "36px", fontWeight: "900", color: "#007BFF", margin: "8px 0", letterSpacing: "-0.5px" }}>
           {cleanHmsString}
         </div>
         
-        {/* SMALL TEXT: Decimal format in brackets (19.279 hrs) */}
+        {/* SMALL TEXT: Decimal format */}
         <div style={{ fontSize: "15px", color: "#666", fontWeight: "bold", marginBottom: "12px" }}>
           ({monthlyTotal.toFixed(3)} hrs)
         </div>
+
+        {/* 🚀 NEW: BONUS PROGRESS TRACKER */}
+        {!isUSD && threshold > 0 && (
+          <div style={{ marginBottom: "12px", fontSize: "13px" }}>
+            {isBonusUnlocked ? (
+              <span style={{ color: "#d97706", fontWeight: "bold", backgroundColor: "#fffbeb", padding: "4px 10px", borderRadius: "12px" }}>
+                🎉 Target Hit! Earning ${currencySymbol}${bonusRate}/hr
+              </span>
+            ) : (
+              <span style={{ color: "#64748b" }}>
+                Work <b>{hoursNeededForBonus.toFixed(1)} more hours</b> to unlock ${currencySymbol}${bonusRate}/hr
+              </span>
+            )}
+          </div>
+        )}
 
         {/* 💰 EARNINGS BADGE */}
         <div style={{ display: "inline-block", backgroundColor: "#e8f5e9", color: "#155724", padding: "6px 16px", borderRadius: "20px", fontSize: "15px", fontWeight: "bold", border: "1px solid #c3e6cb", boxShadow: "0 2px 4px rgba(40,167,69,0.1)" }}>
@@ -211,8 +251,18 @@ export default function CalendarBoard({
         >
           📊 View in Excel
         </button>
+
+        {myRole !== 'rater' && (
+          <button 
+            onClick={() => setCurrentView('ratersPerformance')}
+            style={{ flex: 1, padding: "10px", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "13px", fontWeight: "bold", display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }}
+          >
+            👥 Team Performance
+          </button>
+        )}
+
         <button 
-          onClick={() => setCurrentView('progress')}
+          onClick={() => setCurrentView('workProgress')}
           style={{ flex: 1, padding: "10px", backgroundColor: "#17a2b8", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "13px", fontWeight: "bold", display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }}
         >
           📈 View Work Progress
