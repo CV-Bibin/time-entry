@@ -20,6 +20,13 @@ const formatMoney = (num, decimals = 0) => {
   return val.toLocaleString('en-IN', { maximumFractionDigits: decimals });
 };
 
+const getActualLeader = (acc) => {
+  if (acc.role === 'leader' || acc.role === 'co-admin') {
+    return (acc.leaderName || "").trim();
+  }
+  return (acc.assignedLeader || "").trim();
+};
+
 export default function Earnings({ user }) {
   const [usersList, setUsersList] = useState([]);
   const [timeData, setTimeData] = useState([]);
@@ -29,6 +36,8 @@ export default function Earnings({ user }) {
   const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
   const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
   const [searchTerm, setSearchTerm] = useState("");
+  
+  const [conversionRate, setConversionRate] = useState(86);
 
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, "users"), (snap) => setUsersList(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -47,12 +56,17 @@ export default function Earnings({ user }) {
   const isMainAdmin = myProfile.role === 'admin';
   const isCoAdmin = myProfile.role === 'co-admin';
   const isLeader = myProfile.role === 'leader';
-  const myLeaderName = myProfile.leaderName;
+  const myLeaderName = myProfile.leaderName || "Unknown";
 
   let displayMonthName = selectedMonth;
   const [yStr, mStr] = selectedMonth.split('-');
   const mIndex = parseInt(mStr, 10) - 1;
   if (!isNaN(mIndex)) displayMonthName = `${MONTHS[mIndex]} ${yStr}`;
+
+  const otherCoAdmins = usersList
+    .filter(u => (u.role === 'co-admin' || u.role === 'admin') && u.leaderName !== myProfile.leaderName)
+    .map(u => (u.leaderName || "").trim().toLowerCase())
+    .filter(n => n !== "");
 
   const calculateAccount = (acc) => {
     const monthLogs = timeData.filter(l => l.email === acc.email && typeof l.assigned_date === 'string' && l.assigned_date.startsWith(selectedMonth));
@@ -62,60 +76,73 @@ export default function Earnings({ user }) {
     const tBase = Number(acc.bonusThreshold) || 40;
     const isBonusMet = acc.hasBonus && mTotal >= tBase;
     
-    const fallbackRate = Number(acc.payRateUSD) || 0;
-    const hasLeaderRate = Number(acc.leaderBaseINR) > 0 || Number(acc.leaderMaxINR) > 0;
-    const hasRaterRate = Number(acc.raterBaseINR) > 0 || Number(acc.raterMaxINR) > 0;
+    const isNoRater = !!acc.noRater || String(acc.raterName || "").trim().toLowerCase() === "self";
+    const cLRate = isBonusMet ? (Number(acc.leaderMaxINR) || Number(acc.leaderBaseINR) || 0) : (Number(acc.leaderBaseINR) || 0);
+    const cRRate = isNoRater ? 0 : (isBonusMet ? (Number(acc.raterMaxINR) || Number(acc.raterBaseINR) || 0) : (Number(acc.raterBaseINR) || 0));
 
-    const cLRate = hasLeaderRate ? (isBonusMet ? (Number(acc.leaderMaxINR) || Number(acc.leaderBaseINR) || 0) : (Number(acc.leaderBaseINR) || 0)) : fallbackRate;
-    const cRRate = hasRaterRate ? (isBonusMet ? (Number(acc.raterMaxINR) || Number(acc.raterBaseINR) || 0) : (Number(acc.raterBaseINR) || 0)) : fallbackRate;
-    
-    const revenue = mTotal * cLRate;       
+    const usdRate = Number(acc.payRateUSD) || 0;
+    const totalAgencyRevenue = mTotal * usdRate * conversionRate;
+    const leaderPayout = mTotal * cLRate;       
     const workerPayout = mTotal * cRRate;  
-    const margin = revenue - workerPayout; 
+    
+    const margin = usdRate > 0 ? (totalAgencyRevenue - leaderPayout) : 0;
 
     const cName = (acc.clientName || "").trim().toLowerCase();
-    const isInternal = cName === 'me' || cName === 'internal' || cName === 'general pool' || cName === '';
-    const isExternal = !isInternal;
+    const lNameLower = myLeaderName.toLowerCase();
+    
+    const isMyAccount = cName === lNameLower || cName === 'me';
+    const isOtherCoAdminAccount = otherCoAdmins.includes(cName);
+    const isSharedExternalAccount = !isMyAccount && !isOtherCoAdminAccount;
+    
     const isRatedByMe = acc.email === user.email;
+
+    let safeHandler = getActualLeader(acc);
+    if (isRatedByMe) {
+      safeHandler = myLeaderName;
+    } else if (safeHandler === "") {
+      if (isMyAccount) safeHandler = myLeaderName;
+      else if (isOtherCoAdminAccount) safeHandler = acc.clientName || "Unknown";
+      else safeHandler = "Direct / Unassigned";
+    }
 
     let myProfit = 0;
     if (isMainAdmin || isCoAdmin) {
-      if (isRatedByMe) {
-        myProfit = isInternal ? revenue : workerPayout + (margin / 2);
-      } else {
-        myProfit = isInternal ? margin : (margin / 2);
+      if (isMyAccount) {
+        myProfit += margin; 
+      } else if (isSharedExternalAccount) {
+        myProfit += (margin / 2); 
+      }
+      
+      if (safeHandler.toLowerCase() === lNameLower) {
+        myProfit += leaderPayout;
       }
     }
 
     return {
-      ...acc, mTotal, revenue, workerPayout, margin, myProfit, isInternal, isExternal, isRatedByMe, cLRate, cRRate, isBonusMet
+      ...acc, mTotal, totalAgencyRevenue, leaderPayout, workerPayout, margin, myProfit, isMyAccount, isSharedExternalAccount, isOtherCoAdminAccount, isRatedByMe, cLRate, cRRate, isBonusMet, isNoRater, safeHandler, usdRate
     };
   };
 
   // ============================================================================
-  // 👔 VIEW 1: CO-ADMIN / ADMIN VIEW
+  // 👔 VIEW 1: CO-ADMIN / ADMIN VIEW 
   // ============================================================================
   if (isMainAdmin || isCoAdmin) {
-    // 🚀 STRICT PRIVACY FILTERING ENGINE
     let rawAccounts = [];
     if (isMainAdmin) {
       rawAccounts = usersList;
     } else if (isCoAdmin) {
       rawAccounts = usersList.filter(u => {
-        if (u.email === user.email || u.assignedLeader === myLeaderName) return true;
+        const actualLeader = getActualLeader(u);
+        if (u.email === user.email || actualLeader.toLowerCase() === myLeaderName.toLowerCase()) return true;
         if (u.role === 'admin' || u.role === 'co-admin') return false;
-        
-        const cName = (u.clientName || "").trim().toLowerCase();
-        const lName = (u.assignedLeader || "").trim().toLowerCase();
-        const isPersonal = cName === "me" || cName === "internal" || cName === lName;
 
-        if (isPersonal) {
-          const leaderProfile = usersList.find(x => x.leaderName && x.leaderName.toLowerCase() === lName);
-          if (leaderProfile && leaderProfile.role === 'co-admin') {
-            return false; // Hide from view
-          }
-        }
-        return true;
+        const cName = (u.clientName || "").trim().toLowerCase();
+        let lName = actualLeader.toLowerCase();
+        
+        if (lName === "" && otherCoAdmins.includes(cName)) lName = cName;
+        if (otherCoAdmins.includes(cName) && cName === lName) return false;
+        
+        return true; 
       });
     }
 
@@ -124,122 +151,184 @@ export default function Earnings({ user }) {
     if (searchTerm) {
       allAccounts = allAccounts.filter(acc => 
         acc.email.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        (acc.clientName && acc.clientName.toLowerCase().includes(searchTerm.toLowerCase()))
+        (acc.clientName && acc.clientName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (acc.safeHandler && acc.safeHandler.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
     
-    let totalAgencyHours = 0, totalAgencyRevenue = 0, totalOutboundPayroll = 0, totalMyNetProfit = 0;
-    const leaderPayroll = {};
+    // 🚀 NEW SEPARATED METRICS
+    let grandHours = 0, grandProfit = 0, grandExpense = 0;
+    
+    let myOwnHours = 0, myOwnRev = 0, myOwnExpense = 0, myOwnProfit = 0;
+    let extHours = 0, extRev = 0, extExpense = 0, extProfit = 0;
+
+    const myOwnAccounts = [];
+    const externalAccounts = [];
+    const partnerAccounts = [];
 
     allAccounts.forEach(acc => {
-      totalAgencyHours += acc.mTotal;
-      totalAgencyRevenue += acc.revenue;
-      totalMyNetProfit += acc.myProfit;
+      grandHours += acc.mTotal;
+      grandProfit += acc.myProfit;
+      
+      const isSelfWorked = acc.safeHandler.toLowerCase() === myLeaderName.toLowerCase();
+      const expense = isSelfWorked ? 0 : acc.leaderPayout;
+      grandExpense += expense;
 
-      if (!acc.isRatedByMe) {
-        totalOutboundPayroll += acc.workerPayout;
-        const leader = acc.assignedLeader || "Unassigned / Direct";
-        if (!leaderPayroll[leader]) leaderPayroll[leader] = { total: 0, hours: 0, accounts: [] };
-        leaderPayroll[leader].total += acc.workerPayout;
-        leaderPayroll[leader].hours += acc.mTotal;
-        leaderPayroll[leader].accounts.push(acc);
+      // Fallback revenue logic: If USD rate is missing, fallback to the leader payout as the base revenue
+      const actualRevenue = acc.totalAgencyRevenue > 0 ? acc.totalAgencyRevenue : acc.leaderPayout;
+
+      if (acc.isMyAccount) {
+        myOwnAccounts.push(acc);
+        myOwnHours += acc.mTotal;
+        myOwnRev += actualRevenue;
+        myOwnExpense += expense;
+        myOwnProfit += acc.myProfit;
+      } else {
+        if (acc.isSharedExternalAccount) externalAccounts.push(acc);
+        else if (acc.isOtherCoAdminAccount) partnerAccounts.push(acc);
+
+        extHours += acc.mTotal;
+        extRev += actualRevenue;
+        extExpense += expense;
+        extProfit += acc.myProfit;
       }
     });
 
-    const internalAccounts = allAccounts.filter(a => a.isInternal);
-    const externalAccounts = allAccounts.filter(a => a.isExternal);
-
-    const AdminTable = ({ title, accounts, isExternal }) => {
+    const AdminTable = ({ title, accounts, isExternalGroup }) => {
       if (accounts.length === 0) return null;
       
       const tHours = accounts.reduce((sum, a) => sum + a.mTotal, 0);
-      const tRev = accounts.reduce((sum, a) => sum + a.revenue, 0);
-      const tPayout = accounts.reduce((sum, a) => sum + a.workerPayout, 0);
+      const tOwed = accounts.reduce((sum, a) => sum + (a.safeHandler.toLowerCase() === myLeaderName.toLowerCase() ? 0 : a.leaderPayout), 0);
       const tProfit = accounts.reduce((sum, a) => sum + a.myProfit, 0);
 
       return (
-        <div style={{ backgroundColor: "#fff", borderRadius: "12px", border: "1px solid #e2e8f0", overflow: "hidden", marginBottom: "25px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
-          <div style={{ backgroundColor: "#f8fafc", padding: "12px 20px", fontWeight: "800", color: "#1e293b", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: "15px" }}>{title}</span>
-            {isExternal && <span style={{ fontSize: "11px", color: "#c2410c", backgroundColor: "#ffedd5", padding: "4px 10px", borderRadius: "12px", fontWeight: "700" }}>External Margin (50% Shared with Vivek)</span>}
+        <div style={{ backgroundColor: "#fff", borderRadius: "12px", border: "1px solid #cbd5e1", overflow: "hidden", marginBottom: "30px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
+          <div style={{ backgroundColor: isExternalGroup ? "#fff7ed" : "#f1f5f9", padding: "16px 20px", fontWeight: "900", color: isExternalGroup ? "#c2410c" : "#0f172a", borderBottom: "2px solid #cbd5e1", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "16px" }}>
+            <span>{title}</span>
+            {isExternalGroup && <span style={{ fontSize: "11px", color: "#9a3412", backgroundColor: "#ffedd5", border: "1px solid #fdba74", padding: "4px 10px", borderRadius: "12px", fontWeight: "800" }}>50% MARGIN SPLIT</span>}
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", whiteSpace: "nowrap" }}>
-            <thead>
-              <tr style={{ backgroundColor: "#f1f5f9", fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>
-                <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0" }}>Account</th>
-                <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0" }}>Client Tag</th>
-                <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0" }}>Leader</th>
-                <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>Hours</th>
-                <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>Leader Payout Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map(acc => (
-                <tr key={acc.email} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                  <td style={{ padding: "12px 20px", fontWeight: "600", color: "#0f172a" }}>{acc.email}</td>
-                  <td style={{ padding: "12px 20px", color: "#64748b", fontSize: "12px" }}>{acc.clientName || "-"}</td>
-                  <td style={{ padding: "12px 20px", color: "#475569", fontWeight: "600" }}>{acc.assignedLeader || "-"}</td>
-                  <td style={{ padding: "12px 20px", textAlign: "center", color: "#334155", fontWeight: "600" }}>{formatTime(acc.mTotal)}</td>
-                  <td style={{ padding: "12px 20px", textAlign: "right", fontWeight: "800", color: "#1d4ed8" }}>₹{formatMoney(acc.leaderPayment)}</td>
+          
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", whiteSpace: "nowrap" }}>
+              <thead>
+                <tr style={{ backgroundColor: "#f8fafc", fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: "800" }}>
+                  <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0" }}>Account Name</th>
+                  <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0" }}>Client Tag</th>
+                  <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0" }}>Managed By</th>
+                  <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>Hours</th>
+                  <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#059669" }}>Client Rate ($/hr)</th>
+                  <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>Leader Rate (₹)</th>
+                  <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0", textAlign: "right", color: "#1d4ed8" }}>Payout to Leader</th>
+                  <th style={{ padding: "12px 20px", borderBottom: "1px solid #e2e8f0", textAlign: "right", color: "#047857" }}>My Profit</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    };
-
-    const renderAccountGroup = (title, accounts, isExternal) => {
-      if (accounts.length === 0) return null;
-      
-      const myAccs = accounts.filter(a => a.isRatedByMe);
-      const teamAccs = accounts.filter(a => !a.isRatedByMe);
-      const leaderGroups = {};
-      teamAccs.forEach(a => {
-        const l = a.assignedLeader || "Unassigned";
-        if (!leaderGroups[l]) leaderGroups[l] = [];
-        leaderGroups[l].push(a);
-      });
-
-      return (
-        <div style={{ marginBottom: "50px" }}>
-          <h2 style={{ fontSize: "22px", color: "#0f172a", borderBottom: "3px solid #cbd5e1", paddingBottom: "10px", marginBottom: "25px", fontWeight: "900" }}>{title}</h2>
-          <AdminTable title="👨‍💻 Rated by Me" accounts={myAccs} isExternal={isExternal} />
-          {Object.keys(leaderGroups).sort().map(l => (
-            <AdminTable key={l} title={`👑 Rated by Team: ${l}`} accounts={leaderGroups[l]} isExternal={isExternal} />
-          ))}
+              </thead>
+              <tbody>
+                {accounts.sort((a,b) => b.mTotal - a.mTotal).map(acc => {
+                  const isWorkedByMe = acc.safeHandler.toLowerCase() === myLeaderName.toLowerCase();
+                  return (
+                    <tr key={acc.email} style={{ borderBottom: "1px solid #f1f5f9", transition: "0.2s" }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#f8fafc"} onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
+                      <td style={{ padding: "14px 20px", fontWeight: "700", color: "#0f172a" }}>
+                        {acc.email}
+                        {acc.isRatedByMe && <span style={{ marginLeft: "8px", fontSize: "9px", backgroundColor: "#e2e8f0", padding: "2px 6px", borderRadius: "4px", color: "#475569" }}>WORKED BY ME</span>}
+                      </td>
+                      <td style={{ padding: "14px 20px", color: "#2563eb", fontSize: "12px", fontWeight: "700" }}>{acc.clientName || "General"}</td>
+                      <td style={{ padding: "14px 20px", color: "#475569", fontWeight: "600", fontSize: "13px", textTransform: "capitalize" }}>{acc.safeHandler}</td>
+                      <td style={{ padding: "14px 20px", textAlign: "center", color: "#334155", fontWeight: "800" }}>{formatTime(acc.mTotal)}</td>
+                      <td style={{ padding: "14px 20px", textAlign: "center", color: "#059669", fontSize: "13px", fontWeight: "800" }}>{acc.usdRate > 0 ? `$${acc.usdRate}` : '-'}</td>
+                      <td style={{ padding: "14px 20px", textAlign: "center", color: "#64748b", fontSize: "13px", fontWeight: "600" }}>₹{acc.cLRate} {acc.isBonusMet && <span style={{fontSize: "10px", color:"#10b981", fontWeight:"bold"}}>(BONUS)</span>}</td>
+                      <td style={{ padding: "14px 20px", textAlign: "right", fontWeight: "800", color: "#1e3a8a", backgroundColor: "#eff6ff" }}>
+                        {isWorkedByMe ? <span style={{color: "#94a3b8", fontSize: "12px", fontWeight: "600"}}>N/A (Self)</span> : `₹${formatMoney(acc.leaderPayout)}`}
+                      </td>
+                      <td style={{ padding: "14px 20px", textAlign: "right", fontWeight: "800", color: "#064e3b", backgroundColor: "#ecfdf5" }}>₹{formatMoney(acc.myProfit)}</td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ backgroundColor: isExternalGroup ? "#ffedd5" : "#e2e8f0" }}>
+                  <td colSpan="3" style={{ padding: "14px 20px", textAlign: "right", fontWeight: "900", color: isExternalGroup ? "#9a3412" : "#334155" }}>Group Subtotals:</td>
+                  <td style={{ padding: "14px 20px", textAlign: "center", fontWeight: "900", color: "#0f172a" }}>{formatTime(tHours)}</td>
+                  <td colSpan="2"></td>
+                  <td style={{ padding: "14px 20px", textAlign: "right", fontWeight: "900", color: "#1d4ed8" }}>₹{formatMoney(tOwed)}</td>
+                  <td style={{ padding: "14px 20px", textAlign: "right", fontWeight: "900", color: "#047857" }}>₹{formatMoney(tProfit)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       );
     };
 
     return (
-      <div style={{ padding: "30px", backgroundColor: "#f1f5f9", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
-        <Header title="Agency Financial Overview" selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} displayMonthName={displayMonthName} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />
+      <div style={{ padding: "30px", backgroundColor: "#f8fafc", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
+        <Header 
+          title="Agency Financial Overview" 
+          selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} 
+          displayMonthName={displayMonthName} 
+          searchTerm={searchTerm} setSearchTerm={setSearchTerm} 
+          conversionRate={conversionRate} setConversionRate={setConversionRate}
+        />
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "20px", marginBottom: "40px" }}>
-          <StatCard title="Total Agency Hours" value={formatTime(totalAgencyHours)} color="slate" />
-          <StatCard title="Total Agency Revenue" value={`₹${formatMoney(totalAgencyRevenue)}`} color="blue" />
-          <StatCard title="Total Outbound Payroll" value={`₹${formatMoney(totalOutboundPayroll)}`} color="red" />
-          <StatCard title="My Total Net Profit" value={`₹${formatMoney(totalMyNetProfit)}`} color="green" />
+        {/* 🚀 GRAND TOTALS */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "20px", marginBottom: "20px" }}>
+          <StatCard title="Grand Total Billed Hours" value={formatTime(grandHours)} color="slate" />
+          <StatCard title="Total Owed (Expense)" value={`₹${formatMoney(grandExpense)}`} color="red" />
+          <StatCard title="Grand Net Profit" value={`₹${formatMoney(grandProfit)}`} color="green" />
         </div>
 
-        {Object.keys(leaderPayroll).length > 0 && (
-          <div style={{ marginBottom: "50px", padding: "25px", backgroundColor: "#fff", borderRadius: "16px", border: "1px solid #e2e8f0", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.05)" }}>
-            <h2 style={{ fontSize: "20px", color: "#0f172a", marginBottom: "20px", display: "flex", alignItems: "center", gap: "10px" }}><span style={{fontSize:"24px"}}>💸</span> Outbound Leader Payroll</h2>
-            <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
-              {Object.keys(leaderPayroll).sort().map(leader => (
-                <div key={leader} style={{ flex: "1 1 250px", backgroundColor: "#fff1f2", border: "1px solid #fecdd3", borderRadius: "12px", padding: "20px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: "800", color: "#9f1239", marginBottom: "10px" }}>{leader}</div>
-                  <div style={{ fontSize: "28px", fontWeight: "900", color: "#be123c", marginBottom: "10px" }}>₹{formatMoney(leaderPayroll[leader].total)}</div>
-                  <div style={{ fontSize: "13px", color: "#e11d48", fontWeight: "600" }}>For {formatTime(leaderPayroll[leader].hours)} across {leaderPayroll[leader].accounts.length} accounts.</div>
-                </div>
-              ))}
+        {/* 🚀 SPLIT SUMMARIES: OWN vs EXTERNAL */}
+        <div style={{ display: "flex", gap: "20px", marginBottom: "40px", flexWrap: "wrap" }}>
+          
+          {/* MY ACCOUNTS SUMMARY */}
+          <div style={{ flex: "1 1 45%", backgroundColor: "#fff", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "20px", boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}>
+            <h3 style={{ margin: "0 0 20px 0", color: "#0f172a", fontSize: "16px", fontWeight: "900" }}>📁 MY ACCOUNTS SUMMARY</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+              <div>
+                <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "800", textTransform: "uppercase" }}>Hours</div>
+                <div style={{ fontSize: "22px", fontWeight: "900", color: "#1e293b" }}>{formatTime(myOwnHours)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "800", textTransform: "uppercase" }}>Total Revenue</div>
+                <div style={{ fontSize: "22px", fontWeight: "900", color: "#2563eb" }}>₹{formatMoney(myOwnRev)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "800", textTransform: "uppercase" }}>Expense (Payouts)</div>
+                <div style={{ fontSize: "22px", fontWeight: "900", color: "#e11d48" }}>₹{formatMoney(myOwnExpense)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "800", textTransform: "uppercase" }}>Net Profit</div>
+                <div style={{ fontSize: "22px", fontWeight: "900", color: "#059669" }}>₹{formatMoney(myOwnProfit)}</div>
+              </div>
             </div>
           </div>
-        )}
 
-        {renderAccountGroup("🏢 INTERNAL ACCOUNTS (AGENCY)", internalAccounts, false)}
-        {renderAccountGroup("🌍 EXTERNAL ACCOUNTS (CLIENTS)", externalAccounts, true)}
+          {/* EXTERNAL ACCOUNTS SUMMARY */}
+          <div style={{ flex: "1 1 45%", backgroundColor: "#fff7ed", border: "1px solid #fdba74", borderRadius: "12px", padding: "20px", boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}>
+            <h3 style={{ margin: "0 0 20px 0", color: "#9a3412", fontSize: "16px", fontWeight: "900" }}>🌍 EXTERNAL ACCOUNTS SUMMARY</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+              <div>
+                <div style={{ fontSize: "11px", color: "#9a3412", fontWeight: "800", textTransform: "uppercase" }}>Hours</div>
+                <div style={{ fontSize: "22px", fontWeight: "900", color: "#7c2d12" }}>{formatTime(extHours)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "11px", color: "#9a3412", fontWeight: "800", textTransform: "uppercase" }}>Total Revenue</div>
+                <div style={{ fontSize: "22px", fontWeight: "900", color: "#2563eb" }}>₹{formatMoney(extRev)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "11px", color: "#9a3412", fontWeight: "800", textTransform: "uppercase" }}>Expense (Payouts)</div>
+                <div style={{ fontSize: "22px", fontWeight: "900", color: "#e11d48" }}>₹{formatMoney(extExpense)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "11px", color: "#9a3412", fontWeight: "800", textTransform: "uppercase" }}>My Profit (50%)</div>
+                <div style={{ fontSize: "22px", fontWeight: "900", color: "#059669" }}>₹{formatMoney(extProfit)}</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <AdminTable title={`📁 MY OWN ACCOUNTS (${myLeaderName.toUpperCase()})`} accounts={myOwnAccounts} isExternalGroup={false} />
+        {isMainAdmin && <AdminTable title={`🤝 PARTNER ACCOUNTS (OTHER CO-ADMINS)`} accounts={partnerAccounts} isExternalGroup={false} />}
+        <AdminTable title="🌍 EXTERNAL ACCOUNTS (CLIENTS / POOL)" accounts={externalAccounts} isExternalGroup={true} />
+        
       </div>
     );
   }
@@ -261,7 +350,7 @@ export default function Earnings({ user }) {
 
     teamAccounts.forEach(acc => {
       totalTeamHours += acc.mTotal;
-      totalReceivables += acc.revenue;
+      totalReceivables += acc.leaderPayout;
       
       if (acc.email !== user.email) {
         totalPayables += acc.workerPayout;
@@ -270,7 +359,7 @@ export default function Earnings({ user }) {
 
       const coAdminName = acc.clientName || "General Pool (Agency)";
       if (!receivablesByCoAdmin[coAdminName]) receivablesByCoAdmin[coAdminName] = 0;
-      receivablesByCoAdmin[coAdminName] += acc.revenue;
+      receivablesByCoAdmin[coAdminName] += acc.leaderPayout;
     });
 
     const myNetEarning = totalReceivables - totalPayables;
@@ -330,7 +419,7 @@ export default function Earnings({ user }) {
   }
 
   // ============================================================================
-  // 👤 VIEW 3: RATER VIEW
+  // 👤 VIEW 3: RATER VIEW (Untouched)
   // ============================================================================
   const myData = calculateAccount(myProfile);
   const myLeader = myProfile.assignedLeader || "Agency Admin";
@@ -366,13 +455,23 @@ export default function Earnings({ user }) {
   );
 }
 
-const Header = ({ title, selectedMonth, setSelectedMonth, displayMonthName, searchTerm, setSearchTerm }) => (
+const Header = ({ title, selectedMonth, setSelectedMonth, displayMonthName, searchTerm, setSearchTerm, conversionRate, setConversionRate }) => (
   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "30px", flexWrap: "wrap", gap: "15px" }}>
     <div>
       <h1 style={{ margin: 0, fontSize: "28px", fontWeight: "900", color: "#0f172a" }}>{title}</h1>
       <p style={{ color: "#64748b", margin: "4px 0 0 0", fontSize: "14px" }}>Viewing data for {displayMonthName}</p>
     </div>
-    <div style={{ display: "flex", gap: "10px" }}>
+    <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+      {setConversionRate && (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", backgroundColor: "#fffbeb", padding: "4px 14px", borderRadius: "8px", border: "1px solid #fde68a" }}>
+          <span style={{ fontSize: "12px", fontWeight: "bold", color: "#d97706" }}>$ to ₹ Rate:</span>
+          <input 
+            type="number" value={conversionRate} onChange={(e) => setConversionRate(e.target.value)}
+            style={{ width: "50px", border: "none", background: "transparent", outline: "none", fontWeight: "900", color: "#b45309", fontSize: "14px" }}
+          />
+        </div>
+      )}
+      
       {setSearchTerm && (
         <input 
           type="text" placeholder="🔍 Search accounts..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
