@@ -260,7 +260,7 @@ export default function Earnings({ user }) {
     return (
       <div style={{ padding: "30px", backgroundColor: "#f8fafc", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
         <Header 
-          title="Agency Financial Overview" 
+          title="Financial Overview" 
           selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} 
           displayMonthName={displayMonthName} 
           searchTerm={searchTerm} setSearchTerm={setSearchTerm} 
