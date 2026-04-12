@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { db } from "../firebase";
+import { collection, onSnapshot } from "firebase/firestore";
 
 export default function CalendarBoard({
   user,
   myRole, 
-  payData = {}, // 🚀 NEW: Grabs the full pay package instead of just one rate
+  payData = {}, 
   selectedDate, setSelectedDate, setEditingId,
   monthlyEntries, monthlyTotal, targetMonthPrefix,
   todayString, minDateString, 
@@ -15,6 +17,20 @@ export default function CalendarBoard({
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstDayOfWeek = new Date(year, month - 1, 1).getDay(); 
   const monthName = new Date(selectedDate).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+  // 🚀 NEW: LIVE DATABASE FETCH
+  // This bypasses the parent's broken props and fetches the TRUE pay package directly from the database!
+  const [liveUserData, setLiveUserData] = useState(null);
+
+  useEffect(() => {
+    if (!user?.email) return;
+    const unsub = onSnapshot(collection(db, "users"), (snap) => {
+      const allUsers = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const me = allUsers.find(u => u.email === user.email);
+      if (me) setLiveUserData(me);
+    });
+    return () => unsub();
+  }, [user?.email]);
 
   // ==========================================
   // 🗓️ MONTH NAVIGATION LOGIC
@@ -38,34 +54,44 @@ export default function CalendarBoard({
   const isViewingCurrentMonth = targetMonthPrefix >= todayString.substring(0, 7);
 
   // ==========================================
-  // 💰 SMART PAY RATE CALCULATION
+  // 💰 SMART PAY RATE CALCULATION (INR LEADER PAY ONLY)
   // ==========================================
-  let baseRate = payData.raterBaseINR || 0;
-  let bonusRate = payData.raterBonusINR || 0;
-  let currencySymbol = '₹';
-  let isUSD = false;
+  
+  // MERGE: Overrides any broken/stale props with the live, accurate database values
+  const d = { ...user, ...payData, ...(liveUserData || {}) };
 
-  // Determine the rate based on who is logged into this account
-  if (myRole === 'leader') {
-    baseRate = payData.leaderBaseINR || 0;
-    bonusRate = payData.leaderBonusINR || 0;
-  } else if (myRole === 'co-admin' || myRole === 'admin') {
-    baseRate = payData.payRateUSD || 0;
-    bonusRate = payData.payRateUSD || 0; // Owners see flat USD
-    currencySymbol = '$';
-    isUSD = true;
+  let baseRate = Number(d.raterBaseINR) || 0;
+  let bonusRate = Number(d.raterMaxINR) || baseRate;
+  const currencySymbol = '₹';
+
+  // FAILSAFE: If no rater or rater rate is 0, fetch the Leader's pay
+  const isNoRater = !!d.noRater || String(d.raterName || "").trim().toLowerCase() === "self" || String(d.raterName || "").trim() === "";
+  if (isNoRater || baseRate <= 0) {
+    baseRate = Number(d.leaderBaseINR) || 0;
+    bonusRate = Number(d.leaderMaxINR) || baseRate;
   }
 
-  const threshold = payData.bonusThreshold || 40;
-  const isBonusUnlocked = monthlyTotal >= threshold;
+  // MANAGERS ALWAYS SEE LEADER PAY (L. PAY)
+  if (myRole === 'leader' || myRole === 'co-admin' || myRole === 'admin') {
+    baseRate = Number(d.leaderBaseINR) || 0;
+    bonusRate = Number(d.leaderMaxINR) || baseRate;
+  }
+
+  const safeMonthlyTotal = Number(monthlyTotal) || 0;
+  const threshold = Number(d.bonusThreshold) || 40;
+  
+  // BULLETPROOF BONUS CHECKER
+  const hasBonusFlag = (d.hasBonus && String(d.hasBonus).toLowerCase() !== "false") || (bonusRate > baseRate);
+  const isBonusUnlocked = hasBonusFlag && safeMonthlyTotal >= threshold;
+  
   const currentRate = isBonusUnlocked ? bonusRate : baseRate;
-  const estimatedEarnings = monthlyTotal * currentRate;
-  const hoursNeededForBonus = Math.max(0, threshold - monthlyTotal);
+  const estimatedEarnings = safeMonthlyTotal * currentRate;
+  const hoursNeededForBonus = Math.max(0, threshold - safeMonthlyTotal);
 
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat(isUSD ? 'en-US' : 'en-IN', {
+    return new Intl.NumberFormat('en-IN', {
       style: 'currency',
-      currency: isUSD ? 'USD' : 'INR',
+      currency: 'INR',
       minimumFractionDigits: 2
     }).format(amount);
   };
@@ -96,8 +122,8 @@ export default function CalendarBoard({
         <body>
           <h2>Timesheet Report - ${monthName}</h2>
           <p><strong>User:</strong> ${user?.email || 'N/A'}</p>
-          <p><strong>Total Hours:</strong> ${monthlyTotal.toFixed(3)}</p>
-          <p><strong>Estimated Pay:</strong> ${formatCurrency(estimatedEarnings)} (at ${currencySymbol}${currentRate}/hr)</p>
+          <p><strong>Total Hours:</strong> ${safeMonthlyTotal.toFixed(3)}</p>
+          <p><strong>Estimated Pay:</strong> ${safeMonthlyTotal.toFixed(2)} hrs × ${currencySymbol}${currentRate} = ${formatCurrency(estimatedEarnings)}</p>
           <table>
             <thead>
               <tr>
@@ -150,35 +176,71 @@ export default function CalendarBoard({
     
     const isSelected = dateStr === selectedDate;
     const isToday = dateStr === todayString;
-    
     const isFuture = dateStr > todayString;
     const isLocked = dateStr < minDateString;
     const isDisabled = isLocked || isFuture;
+    
+    // Check if hours exist to color the badge
+    const hasHours = dayTotal > 0;
 
     return (
       <div 
         key={dayNum} 
         onClick={isDisabled ? undefined : () => { setSelectedDate(dateStr); setEditingId(null); }}
         style={{ 
-          border: '1px solid #eee', borderRadius: '6px', padding: '8px 4px', textAlign: 'center', 
-          cursor: isDisabled ? 'not-allowed' : 'pointer', 
-          backgroundColor: isSelected ? '#007BFF' : (isToday ? '#e8f5e9' : '#fff'),
-          color: isSelected ? '#fff' : (isFuture ? '#ccc' : '#333'), 
-          boxShadow: isSelected ? '0 4px 10px rgba(0,123,255,0.4)' : 'none',
-          opacity: isDisabled ? 0.5 : 1, 
-          display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
-          minHeight: '65px', transition: 'all 0.2s ease-in-out'
+          backgroundColor: isSelected ? '#eff6ff' : (isDisabled ? '#f8fafc' : '#ffffff'),
+          border: isSelected ? '2px solid #3b82f6' : (isToday ? '1px solid #93c5fd' : '1px solid #e2e8f0'),
+          borderRadius: '10px',
+          padding: '8px',
+          cursor: isDisabled ? 'not-allowed' : 'pointer',
+          opacity: isDisabled ? 0.6 : 1,
+          boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.15)' : 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          minHeight: '85px',
+          transition: 'all 0.2s ease',
+          position: 'relative'
         }}
       >
-        <div style={{ fontWeight: 'bold', fontSize: '15px' }}>{dayNum}</div>
-        <div style={{ fontSize: '11px', marginTop: '4px', fontWeight: dayTotal > 0 ? 'bold' : 'normal', color: isSelected ? '#e0f7fa' : (dayTotal > 0 ? '#28a745' : '#ccc') }}>
-          {dayTotal > 0 ? `${dayTotal.toFixed(1)}h` : '-'}
+        {/* Top Row: Date & Today Badge */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <span style={{ fontWeight: '800', fontSize: '14px', color: isSelected ? '#1e40af' : (isToday ? '#2563eb' : (isDisabled ? '#94a3b8' : '#334155')) }}>
+            {dayNum}
+          </span>
+          {isToday && (
+            <span style={{ fontSize: '9px', fontWeight: '800', color: '#fff', backgroundColor: '#3b82f6', padding: '2px 5px', borderRadius: '4px', letterSpacing: '0.5px' }}>
+              TODAY
+            </span>
+          )}
+        </div>
+
+        {/* Bottom Row: Hours Badge */}
+        <div style={{ alignSelf: 'center', marginTop: 'auto', width: '100%' }}>
+          {hasHours ? (
+            <div style={{ 
+              backgroundColor: isSelected ? '#3b82f6' : '#10b981', 
+              color: '#fff', 
+              fontSize: '13px', 
+              fontWeight: '800', 
+              padding: '4px 0', 
+              borderRadius: '6px', 
+              textAlign: 'center',
+              boxShadow: isSelected ? 'none' : '0 2px 4px rgba(16,185,129,0.2)'
+            }}>
+              {dayTotal.toFixed(1)}h
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', fontSize: '14px', fontWeight: '600', color: '#cbd5e1' }}>
+              -
+            </div>
+          )}
         </div>
       </div>
     );
   });
 
-  const cleanHmsString = formatDecimalToHMS(monthlyTotal).replace(/[()]/g, '');
+  const cleanHmsString = formatDecimalToHMS(safeMonthlyTotal).replace(/[()]/g, '');
 
   return (
     <div style={{ flex: 1, minWidth: 0, padding: "20px", backgroundColor: "#fff", border: "1px solid #ddd", borderRadius: "8px", boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}>
@@ -218,27 +280,27 @@ export default function CalendarBoard({
         
         {/* SMALL TEXT: Decimal format */}
         <div style={{ fontSize: "15px", color: "#666", fontWeight: "bold", marginBottom: "12px" }}>
-          ({monthlyTotal.toFixed(3)} hrs)
+          ({safeMonthlyTotal.toFixed(3)} hrs)
         </div>
 
-        {/* 🚀 NEW: BONUS PROGRESS TRACKER */}
-        {!isUSD && threshold > 0 && (
+        {/* 🚀 BONUS PROGRESS TRACKER */}
+        {hasBonusFlag && threshold > 0 && (
           <div style={{ marginBottom: "12px", fontSize: "13px" }}>
             {isBonusUnlocked ? (
               <span style={{ color: "#d97706", fontWeight: "bold", backgroundColor: "#fffbeb", padding: "4px 10px", borderRadius: "12px" }}>
-                🎉 Target Hit! Earning ${currencySymbol}${bonusRate}/hr
+                🎉 Target Hit! Earning {currencySymbol}{bonusRate}/hr
               </span>
             ) : (
               <span style={{ color: "#64748b" }}>
-                Work <b>{hoursNeededForBonus.toFixed(1)} more hours</b> to unlock ${currencySymbol}${bonusRate}/hr
+                Work <b>{hoursNeededForBonus.toFixed(1)} more hours</b> to unlock {currencySymbol}{bonusRate}/hr
               </span>
             )}
           </div>
         )}
 
-        {/* 💰 EARNINGS BADGE */}
+        {/* 💰 EXPLICIT EARNINGS BADGE */}
         <div style={{ display: "inline-block", backgroundColor: "#e8f5e9", color: "#155724", padding: "6px 16px", borderRadius: "20px", fontSize: "15px", fontWeight: "bold", border: "1px solid #c3e6cb", boxShadow: "0 2px 4px rgba(40,167,69,0.1)" }}>
-          Estimated Pay: {formatCurrency(estimatedEarnings)}
+          Estimated Pay: {safeMonthlyTotal.toFixed(2)} hrs × {currencySymbol}{currentRate} = {formatCurrency(estimatedEarnings)}
         </div>
       </div>
 
@@ -269,10 +331,12 @@ export default function CalendarBoard({
         </button>
       </div>
 
-      {/* 3. CALENDAR GRID */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
+     {/* 3. CALENDAR GRID */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px' }}>
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-          <div key={d} style={{ textAlign: 'center', fontSize: '12px', fontWeight: 'bold', color: '#888', paddingBottom: '4px' }}>{d}</div>
+          <div key={d} style={{ textAlign: 'center', fontSize: '11px', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', paddingBottom: '4px' }}>
+            {d}
+          </div>
         ))}
         {blanks}
         {days}

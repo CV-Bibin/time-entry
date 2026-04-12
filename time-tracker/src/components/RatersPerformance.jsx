@@ -60,7 +60,6 @@ const getWeekIndex = (dateString) => {
   } catch (err) { return 0; }
 };
 
-// 🚀 CRITICAL FIX: Matches the exact logic from the Finance Page
 const getActualLeader = (acc) => {
   if (acc.role === 'leader' || acc.role === 'co-admin') {
     return (acc.leaderName || "").trim();
@@ -259,22 +258,35 @@ export default function RatersPerformance({ user }) {
     acc.wHrs.forEach((h, i) => grandWkTotal[i] += h);
   });
 
-  const leaderPayouts = {};
+  // 🚀 NEW SEPARATED LEADER PAYOUTS LOGIC
+  const leaderPayouts = {}; 
   if (isMainAdmin || isCoAdmin) {
     filteredTeam.forEach(acc => {
-      let leader = getActualLeader(acc);
-      if (leader === "") {
-        const cName = (acc.clientName || "").trim().toLowerCase();
-        if (cName === "me" || cName === "internal" || cName === "general pool" || cName === "" || cName === myLeaderName.toLowerCase()) {
-          leader = myLeaderName;
-        } else {
-          leader = "Direct / Unassigned";
-        }
+      const cName = (acc.clientName || "").trim().toLowerCase();
+      
+      // Determine Who FUNDS the account (Owner)
+      let ownerLabel = "EXTERNAL ACCOUNTS";
+      if (cName === "me" || cName === "internal" || cName === "general pool" || cName === "" || cName === myLeaderName.toLowerCase()) {
+        ownerLabel = myLeaderName.toUpperCase();
+      } else if (otherCoAdmins.includes(cName)) {
+        ownerLabel = cName.toUpperCase();
       }
 
-      if (!leaderPayouts[leader]) leaderPayouts[leader] = { total: 0, accounts: new Set() };
-      leaderPayouts[leader].total += acc.rev;
-      leaderPayouts[leader].accounts.add(acc.email ? acc.email.split('@')[0] : "unknown");
+      // Determine Who GETS PAID (Leader)
+      let leader = getActualLeader(acc);
+      if (leader === "") {
+        if (ownerLabel === myLeaderName.toUpperCase()) leader = myLeaderName;
+        else if (otherCoAdmins.includes(cName)) leader = cName;
+        else leader = "Direct / Unassigned";
+      }
+      leader = leader.toUpperCase();
+
+      // Build Nested Object: { [Owner]: { [Leader]: { total: X, accounts: [...] } } }
+      if (!leaderPayouts[ownerLabel]) leaderPayouts[ownerLabel] = {};
+      if (!leaderPayouts[ownerLabel][leader]) leaderPayouts[ownerLabel][leader] = { total: 0, accounts: new Set() };
+      
+      leaderPayouts[ownerLabel][leader].total += acc.rev;
+      leaderPayouts[ownerLabel][leader].accounts.add(acc.email ? acc.email.split('@')[0] : "unknown");
     });
   }
 
@@ -353,13 +365,13 @@ export default function RatersPerformance({ user }) {
           if (safeHandler === "") safeHandler = handler;
           if (safeHandler === "ME") safeHandler = myLeaderName;
           
-          const actualRater = isManager ? "Leader/Self" : (acc.isNoRater ? "No Rater" : (acc.raterName || "Unassigned"));
+          const actualRater = isManager ? null : (acc.isNoRater ? "No Rater" : (acc.raterName || "Unassigned"));
 
           tableHTML += `
             <tr style="text-align: center;">
               <td style="text-align: left; font-weight: bold; padding: 8px;">
                 ${acc.email}${stat}<br/>
-                <span style="font-size: 10px; color: #64748b;">C: ${acc.clientName || "General"} | W: ${actualRater}</span>
+                <span style="font-size: 10px; color: #64748b;">Client: ${acc.clientName || "General"} ${actualRater ? `| W: ${actualRater}` : ''}</span>
               </td>
               ${(isMainAdmin || isCoAdmin) ? `<td>${safeHandler}</td>` : ''}
               ${acc.wHrs.map(h => `<td style="color: #475569;">${h > 0 ? h.toFixed(2) : "-"}</td>`).join('')}
@@ -457,6 +469,7 @@ export default function RatersPerformance({ user }) {
         />
       </div>
 
+      {/* Renders the newly upgraded separated payouts logic */}
       <LeaderPayouts 
         leaderPayouts={leaderPayouts} 
         isMainAdmin={isMainAdmin} 
