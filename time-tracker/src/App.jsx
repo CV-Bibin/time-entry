@@ -158,13 +158,23 @@ function App() {
     <div style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', margin: '0', padding: '20px 40px', fontFamily: 'sans-serif' }}>
       
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ccc', paddingBottom: '15px', flexWrap: 'wrap', gap: '15px' }}>
+        
+        {/* LEFT SIDE: Title, Role Badge, and Welcome Message */}
         <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
           Dashboard
           <span style={{ fontSize: '12px', backgroundColor: '#e2e8f0', padding: '4px 8px', borderRadius: '12px', textTransform: 'uppercase', color: '#475569' }}>
             {myRole}
           </span>
+          
+          {/* 🚀 ADDED THE WELCOME MESSAGE HERE */}
+          <span style={{ fontSize: '15px', fontWeight: '500', color: '#64748b', marginLeft: '10px' }}>
+            Welcome, <span style={{ color: '#0f172a', fontWeight: '800', textTransform: 'capitalize' }}>
+              {user?.displayName || user?.email?.split('@')[0] || "User"}
+            </span> 👋
+          </span>
         </h2>
         
+        {/* RIGHT SIDE: Navigation Buttons and Email */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           
           <button 
@@ -174,7 +184,6 @@ function App() {
             📅 My Calendar
           </button>
 
-          {/* 🚀 NEW WALLET / PAYMENTS BUTTON (Everyone can see this) */}
           <button 
             onClick={() => setCurrentView('earnings')} 
             style={{ padding: '6px 14px', cursor: 'pointer', border: 'none', borderRadius: '6px', background: currentView === 'earnings' ? '#8b5cf6' : '#f3f4f6', color: currentView === 'earnings' ? 'white' : '#6d28d9', fontWeight: 'bold', transition: '0.2s' }}
@@ -182,7 +191,6 @@ function App() {
             💰 {isAdmin ? 'Payouts' : 'My Wallet'}
           </button>
 
-          {/* 🚀 LEADER / CO-ADMIN / ADMIN BUTTON */}
           {isManager && (
             <button 
               onClick={() => setCurrentView('ratersPerformance')} 
@@ -192,7 +200,6 @@ function App() {
             </button>
           )}
 
-          {/* 🚀 CO-ADMIN / ADMIN BUTTON */}
           {isCoAdmin && (
             <button 
               onClick={() => setCurrentView('accountManagement')} 
@@ -202,7 +209,6 @@ function App() {
             </button>
           )}
 
-          {/* 🚀 STRICT ADMIN ONLY BUTTON */}
           {isAdmin && (
             <button 
               onClick={() => setCurrentView('admin')} 
@@ -214,6 +220,7 @@ function App() {
 
           <div style={{ width: '1px', height: '24px', backgroundColor: '#ccc', margin: '0 5px' }}></div>
 
+          {/* 🚀 RESTORED THE EMAIL TEXT ON THE RIGHT */}
           <span style={{ fontSize: '14px', color: '#555' }}>{user.email}</span>
           <button onClick={handleLogout} style={{ padding: '6px 12px', cursor: 'pointer', border: '1px solid #ccc', borderRadius: '4px', background: '#fff' }}>Log Out</button>
         </div>
