@@ -314,12 +314,12 @@ export default function CalendarBoard({
           📊 View in Excel
         </button>
 
-        {myRole !== 'rater' && (
+      {myRole !== 'rater' && (
           <button 
-            onClick={() => setCurrentView('ratersPerformance')}
+            onClick={() => setCurrentView('teamGraphs')}
             style={{ flex: 1, padding: "10px", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "13px", fontWeight: "bold", display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }}
           >
-            👥 Team Performance
+            📊 Team Performance
           </button>
         )}
 

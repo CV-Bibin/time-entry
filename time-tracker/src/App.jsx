@@ -4,6 +4,7 @@ import AdminPanel from './components/AdminPanel';
 import RatersPerformance from './components/RatersPerformance'; 
 import AccountManagement from './components/AccountManagement';
 import Earnings from './components/Earnings.jsx'; // 🚀 IMPORTED THE NEW EARNINGS TAB
+import TeamPerformanceGraphs from './components/TeamPerformanceGraphs';
 
 import { useState, useEffect } from 'react';
 import { 
@@ -236,6 +237,7 @@ function App() {
         
         {/* Protected Routes */}
         {currentView === 'ratersPerformance' && isManager && <RatersPerformance user={user} setCurrentView={setCurrentView} />}
+        {currentView === 'teamGraphs' && isManager && <TeamPerformanceGraphs user={user} setCurrentView={setCurrentView} />}
         {currentView === 'accountManagement' && isCoAdmin && <AccountManagement setCurrentView={setCurrentView} currentUser={user} myRole={myRole} />}
         {currentView === 'admin' && isAdmin && <AdminPanel setCurrentView={setCurrentView} currentUser={user} myRole={myRole} />}
       </main>
