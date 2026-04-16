@@ -374,9 +374,37 @@ export default function AdminPanel({ setCurrentView }) {
         </div>
       </div>
 
+      {/* 🚀 NEW: PENDING PASSWORD REQUESTS */}
+      {usersList.filter(u => u.pwdChangeStatus === 'pending').length > 0 && (
+        <div style={{ marginBottom: "30px", backgroundColor: "#fffbeb", border: "1px solid #fde68a", borderRadius: "12px", padding: "20px", boxShadow: "0 4px 6px rgba(217, 119, 6, 0.1)" }}>
+          <h2 style={{ margin: "0 0 15px 0", color: "#b45309", fontSize: "18px", display: "flex", alignItems: "center", gap: "8px" }}>
+            🔔 Pending Password Reset Requests
+          </h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {usersList.filter(u => u.pwdChangeStatus === 'pending').map(reqUser => (
+              <div key={reqUser.email} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "12px 20px", borderRadius: "8px", border: "1px solid #fde68a" }}>
+                <span style={{ fontWeight: "bold", color: "#1e293b", fontSize: "14px" }}>{reqUser.email}</span>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button 
+                    onClick={() => updateUser(reqUser.email, 'pwdChangeStatus', 'approved')}
+                    style={{ padding: "6px 12px", backgroundColor: "#10b981", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>
+                    ✅ Approve
+                  </button>
+                  <button 
+                    onClick={() => updateUser(reqUser.email, 'pwdChangeStatus', null)}
+                    style={{ padding: "6px 12px", backgroundColor: "#ef4444", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>
+                    ❌ Deny
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ⚙️ GLOBAL CONFIGURATIONS HEADER */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px", paddingBottom: "15px", borderBottom: "2px solid #e2e8f0" }}>
-        <h2 style={{ margin: 0, color: "#1e293b", fontSize: "20px", display: "flex", alignItems: "center", gap: "8px", fontWeight: "900" }}>
+        <h2 style={{ margin: "0", color: "#1e293b", fontSize: "20px", display: "flex", alignItems: "center", gap: "8px", fontWeight: "900" }}>
           ⚙️ Global Configurations Database
         </h2>
         <button 
