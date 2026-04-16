@@ -4,7 +4,7 @@ import { collection, onSnapshot, doc } from "firebase/firestore";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// 🎨 EXPANDED HIGH-CONTRAST Color Palette (40 Unique Colors for large teams)
+// 🎨 EXPANDED HIGH-CONTRAST Color Palette
 const CHART_COLORS = [
   "#dc2626", "#2563eb", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#db2777", "#65a30d",
   "#4f46e5", "#be123c", "#ca8a04", "#0d9488", "#854d0e", "#1e40af", "#3f6212", "#c026d3",
@@ -19,8 +19,8 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
   const [globalNames, setGlobalNames] = useState({ coAdminNames: [] });
   const [loading, setLoading] = useState(true);
   
-  // 🚀 TIMEFRAME STATE LOGIC
-  const [historyMode, setHistoryMode] = useState('halfYearly'); // quarterly, halfYearly, yearly
+  // TIMEFRAME STATE LOGIC
+  const [historyMode, setHistoryMode] = useState('halfYearly'); 
   const [historyOffset, setHistoryOffset] = useState(0); 
   
   const today = new Date();
@@ -50,6 +50,7 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
 
   const isMainAdmin = myProfile.role === 'admin';
   const isCoAdmin = myProfile.role === 'co-admin';
+  const isLeader = myProfile.role === 'leader';
   const myLeaderName = myProfile.leaderName || "Unknown";
 
   const getActualLeader = (acc) => {
@@ -57,22 +58,40 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
     return (acc.assignedLeader || "").trim();
   };
 
-  // 1. Determine "My Team" accounts
+  const otherCoAdmins = (globalNames.coAdminNames || [])
+    .filter(n => n !== myLeaderName)
+    .map(n => n.toLowerCase());
+
+  // ==========================================
+  // 🚀 1. EXACT MASTER LEDGER FILTER (For Graph 1 & 2)
+  // ==========================================
   let teamAccounts = [];
   if (isMainAdmin) {
     teamAccounts = usersList;
   } else if (isCoAdmin) {
-    const otherCoAdmins = (globalNames.coAdminNames || []).filter(n => n.toLowerCase() !== myLeaderName.toLowerCase()).map(n => n.toLowerCase());
     teamAccounts = usersList.filter(u => {
       const actualLeader = getActualLeader(u);
+      
+      // 1. Show my own accounts
       if (u.email === user.email || actualLeader.toLowerCase() === myLeaderName.toLowerCase()) return true;
+      
+      // 2. Hide base admin/manager logins
       if (u.role === 'admin' || u.role === 'co-admin') return false;
+
       const cName = (u.clientName || "").trim().toLowerCase();
-      if (otherCoAdmins.some(oca => cName === oca || cName.includes(oca))) return false;
-      return true;
+      let lName = actualLeader.toLowerCase();
+      
+      // 🚀 EXACT LOGIC COPIED FROM RATERS PERFORMANCE
+      if (lName === "" && otherCoAdmins.includes(cName)) lName = cName;
+      if (otherCoAdmins.includes(cName) && cName === lName) return false;
+      
+      return true; 
     });
-  } else {
-    teamAccounts = usersList.filter(u => getActualLeader(u).toLowerCase() === myLeaderName.toLowerCase() || u.email === user.email);
+  } else if (isLeader) {
+    teamAccounts = usersList.filter(u => {
+      const actualLeader = getActualLeader(u);
+      return (u.role === 'rater' && actualLeader.toLowerCase() === myLeaderName.toLowerCase()) || u.email === user.email;
+    });
   }
 
   // ==========================================
@@ -81,11 +100,7 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
   const chartData = teamAccounts.map(acc => {
     const monthLogs = timeData.filter(l => l.email === acc.email && typeof l.assigned_date === 'string' && l.assigned_date.startsWith(selectedMonth));
     const totalHours = monthLogs.reduce((sum, l) => sum + (Number(l.time_value_hours) || 0), 0);
-    return {
-      email: acc.email.split('@')[0], 
-      hours: totalHours,
-      isMe: acc.email === user.email
-    };
+    return { email: acc.email.split('@')[0], hours: totalHours, isMe: acc.email === user.email };
   }).filter(data => data.hours > 0).sort((a, b) => b.hours - a.hours);
 
   const maxTotalHours = chartData.length > 0 ? Math.max(...chartData.map(d => d.hours)) : 1;
@@ -122,6 +137,21 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
   // ==========================================
   // 🚀 GRAPH 3 DATA: Historical STACKED BAR Chart
   // ==========================================
+  
+  // 🚀 ISOLATION FILTER FOR GRAPH 3 ONLY: No other Co-Admin tags AT ALL
+  let historicalTeamAccounts = [];
+  if (isMainAdmin) {
+    historicalTeamAccounts = usersList;
+  } else if (isCoAdmin) {
+    historicalTeamAccounts = teamAccounts.filter(u => {
+      const cName = (u.clientName || "").trim().toLowerCase();
+      if (otherCoAdmins.includes(cName)) return false; 
+      return true;
+    });
+  } else if (isLeader) {
+    historicalTeamAccounts = teamAccounts;
+  }
+
   let monthCount = 12;
   let startMonthIndex = 0;
 
@@ -149,35 +179,26 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
     });
   }
 
-  // Pre-calculate user trends to get colors and baseline data
-  const historicalUserTrends = teamAccounts.map((acc, index) => {
-    return { 
-      email: acc.email, 
-      name: acc.email.split('@')[0], 
-      color: CHART_COLORS[index % CHART_COLORS.length] 
-    };
+  const historicalUserTrends = historicalTeamAccounts.map((acc, index) => {
+    return { email: acc.email, name: acc.email.split('@')[0], color: CHART_COLORS[index % CHART_COLORS.length] };
   });
 
-  // Build the Stacked Data arrays mapped by Month
-  let maxHistoricalTotalHours = 40; // Floor scale
+  let maxHistoricalTotalHours = 40; 
   
   const stackedMonthData = historicalMonths.map(m => {
     let totalForMonth = 0;
-    
-    // Map each user's segment for this specific month
     const segments = historicalUserTrends.map(ut => {
       const logs = timeData.filter(l => l.email === ut.email && l.assigned_date?.startsWith(m.prefix));
       const hrs = logs.reduce((sum, l) => sum + (Number(l.time_value_hours) || 0), 0);
       totalForMonth += hrs;
       return { name: ut.name, color: ut.color, hours: hrs };
-    }).filter(seg => seg.hours > 0); // Only keep segments with actual hours
+    }).filter(seg => seg.hours > 0); 
     
     if (totalForMonth > maxHistoricalTotalHours) maxHistoricalTotalHours = totalForMonth;
 
     return { ...m, total: totalForMonth, segments };
   });
 
-  // Filter out the global legend to only show raters who worked during this entire visible period
   const activeRatersInHistory = historicalUserTrends.filter(ut => {
     return stackedMonthData.some(m => m.segments.some(seg => seg.name === ut.name));
   });
@@ -198,7 +219,7 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
           type="month" value={selectedMonth} onChange={(e) => { 
             if (e.target.value) {
               setSelectedMonth(e.target.value);
-              setHistoryOffset(0); // Reset history view when picking a new base month
+              setHistoryOffset(0); 
             } 
           }}
           style={{ padding: "10px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", fontWeight: "700", outline: "none", cursor: "pointer", backgroundColor: "#fff" }}
@@ -223,7 +244,7 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
         </div>
       </div>
 
-      {/* 1. THE BAR CHART (Total Monthly Snapshot) */}
+      {/* 1. THE BAR CHART */}
       <div style={{ backgroundColor: "#fff", padding: "40px", borderRadius: "16px", border: "1px solid #cbd5e1", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.05)", marginBottom: "30px" }}>
         <h3 style={{ margin: "0 0 40px 0", color: "#334155", fontSize: "18px", fontWeight: "800", textAlign: "center" }}>Total Hours Logged by User ({displayMonthName})</h3>
         
@@ -254,7 +275,7 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
         )}
       </div>
 
-      {/* 2. THE DAILY LINE GRAPH (Daily Progress) */}
+      {/* 2. THE DAILY LINE GRAPH */}
       <div style={{ backgroundColor: "#fff", padding: "40px", borderRadius: "16px", border: "1px solid #cbd5e1", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.05)", marginBottom: "30px" }}>
         <h3 style={{ margin: "0 0 10px 0", color: "#334155", fontSize: "18px", fontWeight: "800", textAlign: "center" }}>Daily Individual Trends ({displayMonthName})</h3>
         <p style={{ textAlign: "center", color: "#64748b", fontSize: "13px", marginBottom: "40px", fontWeight: "600" }}>Hover over dots to see exact hours logged per day</p>
@@ -266,7 +287,6 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
             <div style={{ width: "100%", overflowX: "auto", display: "flex", justifyContent: "center", paddingBottom: "20px" }}>
               <svg viewBox="0 0 1000 300" style={{ width: "100%", minWidth: "700px", maxWidth: "1000px", overflow: "visible" }}>
                 
-                {/* Vertical Grid Lines for Each Day */}
                 {daysArray.map((day, i) => {
                   const x = 40 + (i * (920 / (daysInMonth - 1)));
                   return <line key={`vgrid-${day}`} x1={x} y1="50" x2={x} y2="250" stroke="#f1f5f9" strokeWidth="1.5" />;
@@ -336,14 +356,13 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
         )}
       </div>
 
-      {/* 🚀 3. THE HISTORICAL STACKED BAR CHART (With Timers & Navigation) */}
+      {/* 🚀 3. THE HISTORICAL STACKED BAR CHART */}
       <div style={{ backgroundColor: "#fff", padding: "40px", borderRadius: "16px", border: "1px solid #cbd5e1", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.05)" }}>
         
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", flexWrap: "wrap", gap: "15px" }}>
           <h3 style={{ margin: 0, color: "#334155", fontSize: "18px", fontWeight: "800" }}>Historical Performance Tracker</h3>
           
           <div style={{ display: "flex", gap: "15px", alignItems: "center", flexWrap: "wrap" }}>
-            {/* TIMEFRAME SELECTOR */}
             <select 
               value={historyMode} 
               onChange={(e) => { 
@@ -357,7 +376,6 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
               <option value="yearly">Yearly View</option>
             </select>
 
-            {/* NAVIGATION BUTTONS */}
             <div style={{ display: "flex", gap: "8px" }}>
               <button 
                 onClick={() => setHistoryOffset(prev => prev + 1)}
@@ -387,7 +405,11 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
             <div style={{ width: "100%", overflowX: "auto", display: "flex", justifyContent: "center", paddingBottom: "20px" }}>
               <svg viewBox="0 0 1000 300" style={{ width: "100%", minWidth: "700px", maxWidth: "1000px", overflow: "visible" }}>
                 
-                {/* Horizontal Y-Axis Grid Lines */}
+                {historicalMonths.map((_, i) => {
+                  const x = 40 + (i * (920 / (monthCount - 1)));
+                  return <line key={`h-vgrid-${i}`} x1={x} y1="50" x2={x} y2="250" stroke="#f1f5f9" strokeWidth="1.5" />;
+                })}
+
                 <line x1="40" y1="50" x2="960" y2="50" stroke="#e2e8f0" strokeWidth="2" strokeDasharray="6" />
                 <line x1="40" y1="150" x2="960" y2="150" stroke="#e2e8f0" strokeWidth="2" strokeDasharray="6" />
                 <line x1="40" y1="250" x2="960" y2="250" stroke="#cbd5e1" strokeWidth="3" strokeLinecap="round" />
@@ -396,7 +418,6 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
                 <text x="30" y="155" textAnchor="end" fill="#94a3b8" fontSize="12" fontWeight="bold">{Math.ceil(maxHistoricalTotalHours/2)}h</text>
                 <text x="30" y="255" textAnchor="end" fill="#94a3b8" fontSize="12" fontWeight="bold">0h</text>
 
-                {/* X-Axis Month Labels */}
                 {stackedMonthData.map((monthData, i) => {
                   const x = 40 + (i * (920 / (monthCount - 1)));
                   return (
@@ -406,23 +427,20 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
                   );
                 })}
 
-                {/* Draw the Stacked Rectangles */}
                 {stackedMonthData.map((monthData, i) => {
                   const x = 40 + (i * (920 / (monthCount - 1)));
-                  let currentY = 250; // Start building from the bottom axis line up
+                  let currentY = 250; 
 
                   return (
                     <g key={`stack-${i}`}>
-                      {/* Only draw if there are hours this month */}
                       {monthData.total > 0 && (
                         <>
                           {monthData.segments.map((seg, j) => {
                             const barHeight = (seg.hours / maxHistoricalTotalHours) * 200;
-                            currentY -= barHeight; // Move the Y pointer up by the height of this block
+                            currentY -= barHeight; 
                             
                             return (
                               <g key={`seg-${i}-${j}`} style={{ cursor: "pointer" }}>
-                                {/* The colored segment block */}
                                 <rect 
                                   x={x - 20} y={currentY} width="40" height={barHeight} 
                                   fill={seg.color} stroke="#fff" strokeWidth="1" 
@@ -435,7 +453,6 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
                             );
                           })}
                           
-                          {/* Floating Total Label on top of the stack */}
                           <text x={x} y={currentY - 10} textAnchor="middle" fill="#334155" fontSize="13" fontWeight="900">
                             {monthData.total.toFixed(1)}h
                           </text>
@@ -447,7 +464,6 @@ export default function TeamPerformanceGraphs({ user, setCurrentView }) {
               </svg>
             </div>
             
-            {/* The Legend */}
             <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "15px", marginTop: "10px", borderTop: "1px solid #f1f5f9", paddingTop: "20px" }}>
               {activeRatersInHistory.map((ut) => (
                 <div key={`hist-legend-${ut.name}`} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", color: "#475569" }}>
