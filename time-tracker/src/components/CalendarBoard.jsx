@@ -19,7 +19,6 @@ export default function CalendarBoard({
   const monthName = new Date(selectedDate).toLocaleString('default', { month: 'long', year: 'numeric' });
 
   // 🚀 NEW: LIVE DATABASE FETCH
-  // This bypasses the parent's broken props and fetches the TRUE pay package directly from the database!
   const [liveUserData, setLiveUserData] = useState(null);
 
   useEffect(() => {
@@ -54,7 +53,7 @@ export default function CalendarBoard({
   const isViewingCurrentMonth = targetMonthPrefix >= todayString.substring(0, 7);
 
   // ==========================================
-  // 💰 SMART PAY RATE CALCULATION (INR LEADER PAY ONLY)
+  // 💰 SMART PAY RATE CALCULATION
   // ==========================================
   
   // MERGE: Overrides any broken/stale props with the live, accurate database values
@@ -80,8 +79,8 @@ export default function CalendarBoard({
   const safeMonthlyTotal = Number(monthlyTotal) || 0;
   const threshold = Number(d.bonusThreshold) || 40;
   
-  // BULLETPROOF BONUS CHECKER
-  const hasBonusFlag = (d.hasBonus && String(d.hasBonus).toLowerCase() !== "false") || (bonusRate > baseRate);
+  // 🚀 STRICT BONUS CHECKER: ONLY triggers if the checkbox is actually checked in DB!
+  const hasBonusFlag = d.hasBonus === true || String(d.hasBonus).toLowerCase() === "true";
   const isBonusUnlocked = hasBonusFlag && safeMonthlyTotal >= threshold;
   
   const currentRate = isBonusUnlocked ? bonusRate : baseRate;
@@ -180,7 +179,6 @@ export default function CalendarBoard({
     const isLocked = dateStr < minDateString;
     const isDisabled = isLocked || isFuture;
     
-    // Check if hours exist to color the badge
     const hasHours = dayTotal > 0;
 
     return (
@@ -203,7 +201,6 @@ export default function CalendarBoard({
           position: 'relative'
         }}
       >
-        {/* Top Row: Date & Today Badge */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <span style={{ fontWeight: '800', fontSize: '14px', color: isSelected ? '#1e40af' : (isToday ? '#2563eb' : (isDisabled ? '#94a3b8' : '#334155')) }}>
             {dayNum}
@@ -215,7 +212,6 @@ export default function CalendarBoard({
           )}
         </div>
 
-        {/* Bottom Row: Hours Badge */}
         <div style={{ alignSelf: 'center', marginTop: 'auto', width: '100%' }}>
           {hasHours ? (
             <div style={{ 

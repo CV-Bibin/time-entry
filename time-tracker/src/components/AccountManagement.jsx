@@ -24,7 +24,7 @@ const getVersionNum = (email) => {
 // ==========================================
 // 🚀 SPREADSHEET ROW COMPONENT
 // ==========================================
-const AccountRow = ({ acc, updateAccountObject, isManagerAccount, allManagers, allClients, allCoAdminNames, conversionRate, isVersionChild }) => {
+const AccountRow = ({ acc, updateAccountObject, isManagerAccount, allManagers, allClients, allCompanies, allCoAdminNames, conversionRate, isVersionChild }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({});
 
@@ -35,7 +35,7 @@ const AccountRow = ({ acc, updateAccountObject, isManagerAccount, allManagers, a
     if (isSuspended) return;
     setFormData({
       clientName: acc.clientName || "",
-      // 🚀 Use ?? "" so that if it's 0, it shows 0, but if it's empty, it stays empty
+      companyName: acc.companyName || "", // 🚀 Added Company Name
       payRateUSD: acc.payRateUSD ?? "",
       leaderBaseINR: acc.leaderBaseINR ?? "",
       leaderMaxINR: acc.leaderMaxINR ?? "",
@@ -44,17 +44,15 @@ const AccountRow = ({ acc, updateAccountObject, isManagerAccount, allManagers, a
       hasBonus: !!acc.hasBonus,
       bonusThreshold: acc.bonusThreshold ?? 40,
       assignedLeader: acc.assignedLeader || "",
-      raterName: acc.raterName || "",
       noRater: !!acc.noRater || acc.raterName === "Self" || (acc.raterBaseINR === 0 && acc.raterName === "")
     });
     setIsEditing(true);
   };
 
   const handleSaveClick = () => {
-    // 🚀 FIXED: Unconditional Save. No more checking "if changed".
-    // This forces the database to exactly match what you see on screen, even if it's empty.
     const updates = {
       clientName: formData.clientName || "",
+      companyName: formData.companyName || "", // 🚀 Save Company Name
       payRateUSD: formData.payRateUSD === "" ? "" : Number(formData.payRateUSD),
       leaderBaseINR: formData.leaderBaseINR === "" ? "" : Number(formData.leaderBaseINR),
       leaderMaxINR: formData.leaderMaxINR === "" ? "" : Number(formData.leaderMaxINR),
@@ -63,17 +61,12 @@ const AccountRow = ({ acc, updateAccountObject, isManagerAccount, allManagers, a
       hasBonus: !!formData.hasBonus,
       bonusThreshold: Number(formData.bonusThreshold) || 40,
       assignedLeader: formData.assignedLeader || "",
-      raterName: String(formData.raterName || "").trim(),
-      noRater: !!formData.noRater
+      noRater: !!formData.noRater,
+      raterName: !!formData.noRater ? "Self" : "" // Keep clean for logic relying on 'Self'
     };
 
     updateAccountObject(acc.email, updates);
     setIsEditing(false);
-  };
-
-  const handleAutoName = () => {
-    const prefix = formData.assignedLeader ? String(formData.assignedLeader).replace(/\s+/g, '') : "Pool";
-    setFormData({ ...formData, raterName: `${prefix}_rater${acc.leaderIndex || 'X'}` });
   };
 
   const handleAutoConvertINR = () => {
@@ -90,7 +83,7 @@ const AccountRow = ({ acc, updateAccountObject, isManagerAccount, allManagers, a
       noRater: isChecked,
       raterBaseINR: isChecked ? "" : formData.raterBaseINR,
       raterMaxINR: isChecked ? "" : formData.raterMaxINR,
-      raterName: isChecked ? "Self" : formData.raterName
+      raterName: isChecked ? "Self" : ""
     });
   };
 
@@ -217,26 +210,45 @@ const AccountRow = ({ acc, updateAccountObject, isManagerAccount, allManagers, a
         )}
       </td>
 
-      <td style={{ padding: "16px 12px" }}>
-        {isManagerAccount ? (
-          <div style={{ fontSize: "12px", fontWeight: "bold", color: acc.role === 'co-admin' ? "#7e22ce" : "#1d4ed8" }}>
-            👤 Managed by {acc.leaderName || "Self"}
-          </div>
-        ) : isEditing ? (
+ <td style={{ padding: "16px 12px" }}>
+        {isEditing ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            <select value={formData.assignedLeader} onChange={(e) => setFormData({...formData, assignedLeader: e.target.value})} style={{...inputStyle, width: "130px", cursor: "pointer"}}>
-              <option value="">-- No Leader --</option>
-              {allManagers.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+            
+            {/* Show Leader Dropdown for Raters, but just show text for Managers */}
+            {isManagerAccount ? (
+              <div style={{ fontSize: "11px", fontWeight: "bold", color: acc.role === 'co-admin' ? "#7e22ce" : "#1d4ed8" }}>
+                👤 L: {acc.leaderName || "Self"}
+              </div>
+            ) : (
+              <select value={formData.assignedLeader} onChange={(e) => setFormData({...formData, assignedLeader: e.target.value})} style={{...inputStyle, width: "130px", cursor: "pointer"}}>
+                <option value="">-- No Leader --</option>
+                {allManagers.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+              </select>
+            )}
+
+            {/* 🚀 COMPANY NAME NOW VISIBLE & EDITABLE FOR EVERYONE */}
+            <select value={formData.companyName} onChange={(e) => setFormData({...formData, companyName: e.target.value})} style={{...inputStyle, width: "130px", cursor: "pointer"}}>
+              <option value="">-- No Company --</option>
+              {allCompanies.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <div style={{ display: "flex", gap: "4px" }}>
-              <input type="text" placeholder="Worker Name" value={formData.raterName} disabled={formData.noRater} onChange={(e) => setFormData({...formData, raterName: e.target.value})} style={{...inputStyle, width: "90px", backgroundColor: formData.noRater ? "#f1f5f9" : "#fff", color: formData.noRater ? "#94a3b8" : "#1e293b"}} />
-              {!formData.noRater && <button onClick={handleAutoName} style={{ background: "#e2e8f0", border: "none", borderRadius: "4px", fontSize: "10px", fontWeight: "bold", cursor: "pointer", padding: "0 6px" }}>Auto</button>}
-            </div>
+
+            {/* Only show Rater auto-name for actual raters */}
+            {!isManagerAccount && (
+              <div style={{ display: "flex", gap: "4px" }}>
+                <input type="text" placeholder="Worker Name" value={formData.raterName} disabled={formData.noRater} onChange={(e) => setFormData({...formData, raterName: e.target.value})} style={{...inputStyle, width: "90px", backgroundColor: formData.noRater ? "#f1f5f9" : "#fff", color: formData.noRater ? "#94a3b8" : "#1e293b"}} />
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ fontSize: "12px", color: "#334155", display: "flex", flexDirection: "column", gap: "4px" }}>
-            <div><span style={{ color: "#94a3b8", fontWeight: "bold" }}>L:</span> {acc.assignedLeader || <span style={{color: "#ef4444", fontStyle: "italic"}}>Unassigned</span>}</div>
-            <div><span style={{ color: "#94a3b8", fontWeight: "bold" }}>W:</span> {acc.raterName || <span style={{color: "#ef4444", fontStyle: "italic"}}>No Name</span>}</div>
+            {isManagerAccount ? (
+              <div style={{ fontWeight: "bold", color: acc.role === 'co-admin' ? "#7e22ce" : "#1d4ed8" }}>👤 Managed by {acc.leaderName || "Self"}</div>
+            ) : (
+              <div><span style={{ color: "#94a3b8", fontWeight: "bold" }}>L:</span> {acc.assignedLeader || <span style={{color: "#ef4444", fontStyle: "italic"}}>Unassigned</span>}</div>
+            )}
+            
+            {/* 🚀 COMPANY NAME NOW VISIBLE ON THE READ-ONLY VIEW TOO */}
+            <div><span style={{ color: "#94a3b8", fontWeight: "bold" }}>C:</span> {acc.companyName || <span style={{color: "#ef4444", fontStyle: "italic"}}>Unassigned</span>}</div>
           </div>
         )}
       </td>
@@ -264,7 +276,7 @@ const AccountRow = ({ acc, updateAccountObject, isManagerAccount, allManagers, a
 // ==========================================
 // 🚀 SAFE TABLE RENDERER (NOW ACCEPTS SORT)
 // ==========================================
-const AccountTable = ({ filteredAccounts, updateAccountObject, allManagers, allClients, allCoAdminNames, conversionRate, tableSortBy }) => {
+const AccountTable = ({ filteredAccounts, updateAccountObject, allManagers, allClients, allCompanies, allCoAdminNames, conversionRate, tableSortBy }) => {
   const grouped = {};
   filteredAccounts.forEach(acc => {
     const base = getBaseEmail(acc.email);
@@ -318,6 +330,7 @@ const AccountTable = ({ filteredAccounts, updateAccountObject, allManagers, allC
                   isManagerAccount={acc.role === 'leader' || acc.role === 'co-admin'} 
                   allManagers={allManagers} 
                   allClients={allClients}
+                  allCompanies={allCompanies} 
                   allCoAdminNames={allCoAdminNames}
                   conversionRate={conversionRate}
                   isVersionChild={index > 0} 
@@ -336,7 +349,8 @@ const AccountTable = ({ filteredAccounts, updateAccountObject, allManagers, allC
 // ==========================================
 export default function AccountManagement({ setCurrentView }) {
   const [usersList, setUsersList] = useState([]);
-  const [globalNames, setGlobalNames] = useState({ leaderNames: [], coAdminNames: [], clientNames: [] });
+  // 🚀 NEW: Added companyNames to globalNames defaults
+  const [globalNames, setGlobalNames] = useState({ leaderNames: [], coAdminNames: [], clientNames: [], companyNames: [] });
   const [loading, setLoading] = useState(true);
   
   const [conversionRate, setConversionRate] = useState(86);
@@ -346,6 +360,7 @@ export default function AccountManagement({ setCurrentView }) {
   const [newLeader, setNewLeader] = useState("");
   const [newCoAdmin, setNewCoAdmin] = useState("");
   const [newClient, setNewClient] = useState("");
+  const [newCompany, setNewCompany] = useState(""); // 🚀 NEW State
   const [versionModal, setVersionModal] = useState({ isOpen: false, acc: null, email: "", password: "" });
 
   useEffect(() => {
@@ -358,7 +373,10 @@ export default function AccountManagement({ setCurrentView }) {
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "systemSettings", "roles"), (snap) => {
-      if (snap.exists()) setGlobalNames(snap.data());
+      if (snap.exists()) {
+        const data = snap.data();
+        setGlobalNames({ ...data, companyNames: data.companyNames || [] }); // Protect against undefined
+      }
     });
     return () => unsub();
   }, []);
@@ -382,6 +400,7 @@ export default function AccountManagement({ setCurrentView }) {
 
   const checkIsNameInUse = (name, type) => {
     if (type === 'clientNames') return usersList.some(u => u.clientName === name);
+    if (type === 'companyNames') return usersList.some(u => u.companyName === name); // 🚀 NEW Check
     return usersList.some(u => u.leaderName === name || u.assignedLeader === name);
   };
 
@@ -406,6 +425,7 @@ export default function AccountManagement({ setCurrentView }) {
       const updatePromises = usersList.map(async (u) => {
         const updates = {};
         if (type === 'clientNames' && u.clientName === oldName) updates.clientName = cleanNewName;
+        if (type === 'companyNames' && u.companyName === oldName) updates.companyName = cleanNewName; // 🚀 Merge support
         if (type === 'leaderNames' || type === 'coAdminNames') {
           if (u.leaderName === oldName) updates.leaderName = cleanNewName;
           if (u.assignedLeader === oldName) updates.assignedLeader = cleanNewName;
@@ -420,9 +440,10 @@ export default function AccountManagement({ setCurrentView }) {
     }
   };
 
-  const { allManagers, allClients, allCoAdminNames, allLeaderNames, assignableAccounts, unassignedAccounts } = useMemo(() => {
+  const { allManagers, allClients, allCompanies, allCoAdminNames, allLeaderNames, assignableAccounts, unassignedAccounts } = useMemo(() => {
     const validUsers = usersList.filter(u => u && typeof u.email === 'string');
     const clients = Array.isArray(globalNames.clientNames) ? [...globalNames.clientNames].sort() : [];
+    const companies = Array.isArray(globalNames.companyNames) ? [...globalNames.companyNames].sort() : []; // 🚀
     const coAdmins = Array.isArray(globalNames.coAdminNames) ? [...globalNames.coAdminNames].sort() : [];
     const leaders = Array.isArray(globalNames.leaderNames) ? [...globalNames.leaderNames].sort() : [];
     
@@ -451,7 +472,7 @@ export default function AccountManagement({ setCurrentView }) {
       return !String(a.assignedLeader || "").trim() || !managers.some(m => m.name === a.assignedLeader);
     });
 
-    return { allManagers: managers, allClients: clients, allCoAdminNames: coAdmins, allLeaderNames: leaders, assignableAccounts: assignable, unassignedAccounts: unassigned };
+    return { allManagers: managers, allClients: clients, allCompanies: companies, allCoAdminNames: coAdmins, allLeaderNames: leaders, assignableAccounts: assignable, unassignedAccounts: unassigned };
   }, [usersList, globalNames]);
 
   const confirmCreateNewVersion = async () => {
@@ -461,6 +482,7 @@ export default function AccountManagement({ setCurrentView }) {
         email: versionModal.email.toLowerCase(),
         password: versionModal.password,
         clientName: versionModal.acc.clientName || "",
+        companyName: versionModal.acc.companyName || "", // 🚀 Inherit company
         role: "rater",
         status: "active",
         payRateUSD: versionModal.acc.payRateUSD || 0,
@@ -543,7 +565,7 @@ export default function AccountManagement({ setCurrentView }) {
         </div>
 
         {/* ⚙️ GLOBAL NAMES CONFIGURATOR */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "20px", marginBottom: "50px", opacity: isSettingsLocked ? 0.7 : 1, pointerEvents: isSettingsLocked ? "none" : "auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "15px", marginBottom: "50px", opacity: isSettingsLocked ? 0.7 : 1, pointerEvents: isSettingsLocked ? "none" : "auto" }}>
           
           <div style={{ backgroundColor: "#fff", padding: "20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 4px 6px rgba(0,0,0,0.02)" }}>
             <h3 style={{ margin: "0 0 15px 0", color: "#312e81", fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}><span style={{ fontSize: "20px" }}>👑</span> Leaders</h3>
@@ -560,6 +582,7 @@ export default function AccountManagement({ setCurrentView }) {
                   </span>
                 );
               })}
+              {allLeaderNames.length === 0 && <span style={{ color: "#94a3b8", fontSize: "13px", fontStyle: "italic" }}>No Leaders added.</span>}
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
               <input type="text" value={newLeader} onChange={(e)=>setNewLeader(e.target.value)} placeholder="Add Leader..." onKeyDown={(e)=>e.key === 'Enter' && handleAddName('leaderNames', newLeader, setNewLeader)} style={{ flex: 1, padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", outline: "none" }} />
@@ -582,6 +605,7 @@ export default function AccountManagement({ setCurrentView }) {
                   </span>
                 );
               })}
+              {allCoAdminNames.length === 0 && <span style={{ color: "#94a3b8", fontSize: "13px", fontStyle: "italic" }}>No Co-Admins added.</span>}
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
               <input type="text" value={newCoAdmin} onChange={(e)=>setNewCoAdmin(e.target.value)} placeholder="Add Co-Admin..." onKeyDown={(e)=>e.key === 'Enter' && handleAddName('coAdminNames', newCoAdmin, setNewCoAdmin)} style={{ flex: 1, padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", outline: "none" }} />
@@ -604,12 +628,38 @@ export default function AccountManagement({ setCurrentView }) {
                   </span>
                 );
               })}
+              {allClients.length === 0 && <span style={{ color: "#94a3b8", fontSize: "13px", fontStyle: "italic" }}>No Clients added.</span>}
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
               <input type="text" value={newClient} onChange={(e)=>setNewClient(e.target.value)} placeholder="Add Client..." onKeyDown={(e)=>e.key === 'Enter' && handleAddName('clientNames', newClient, setNewClient)} style={{ flex: 1, padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", outline: "none" }} />
               <button onClick={() => handleAddName('clientNames', newClient, setNewClient)} style={{ padding: "8px 15px", background: "#059669", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Add</button>
             </div>
           </div>
+
+          {/* 🚀 NEW CARD: COMPANIES */}
+          <div style={{ backgroundColor: "#fff", padding: "20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 4px 6px rgba(0,0,0,0.02)" }}>
+            <h3 style={{ margin: "0 0 15px 0", color: "#b45309", fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}><span style={{ fontSize: "20px" }}>🌐</span> Companies</h3>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "15px", minHeight: "40px" }}>
+              {allCompanies.map(name => {
+                const inUse = checkIsNameInUse(name, 'companyNames');
+                return (
+                  <span key={name} style={{ background: inUse ? "#f8fafc" : "#fffbeb", color: inUse ? "#64748b" : "#b45309", padding: "4px 10px", borderRadius: "20px", fontSize: "12px", fontWeight: "bold", display: "flex", alignItems: "center", gap: "6px", border: inUse ? "1px solid #cbd5e1" : "none" }}>
+                    {name}
+                    <div style={{ display: "flex", gap: "2px", marginLeft: "4px" }}>
+                      <button onClick={() => handleEditGlobalName('companyNames', name)} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: "12px", padding: 0 }} title="Rename globally">✏️</button>
+                      <button onClick={() => handleRemoveName('companyNames', name)} style={{ background: "transparent", border: "none", color: inUse ? "#94a3b8" : "#d97706", cursor: inUse ? "not-allowed" : "pointer", fontSize: "14px", padding: 0 }} title={inUse ? "Protected" : "Remove name"}>{inUse ? "🔒" : "×"}</button>
+                    </div>
+                  </span>
+                );
+              })}
+              {allCompanies.length === 0 && <span style={{ color: "#94a3b8", fontSize: "13px", fontStyle: "italic" }}>No Companies added.</span>}
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input type="text" value={newCompany} onChange={(e)=>setNewCompany(e.target.value)} placeholder="E.g. Telus..." onKeyDown={(e)=>e.key === 'Enter' && handleAddName('companyNames', newCompany, setNewCompany)} style={{ flex: 1, padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", outline: "none" }} />
+              <button onClick={() => handleAddName('companyNames', newCompany, setNewCompany)} style={{ padding: "8px 15px", background: "#d97706", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Add</button>
+            </div>
+          </div>
+
         </div>
 
         <div style={{ marginBottom: "50px" }}>
@@ -618,7 +668,7 @@ export default function AccountManagement({ setCurrentView }) {
             <span style={{ backgroundColor: "#e2e8f0", color: "#475569", padding: "4px 10px", borderRadius: "20px", fontSize: "13px", fontWeight: "800" }}>{unassignedAccounts.length}</span>
           </div>
           {unassignedAccounts.length > 0 ? (
-            <AccountTable filteredAccounts={unassignedAccounts} updateAccountObject={updateAccountObject} allManagers={allManagers} allClients={allClients} allCoAdminNames={allCoAdminNames} conversionRate={conversionRate} tableSortBy={tableSortBy} />
+            <AccountTable filteredAccounts={unassignedAccounts} updateAccountObject={updateAccountObject} allManagers={allManagers} allClients={allClients} allCompanies={allCompanies} allCoAdminNames={allCoAdminNames} conversionRate={conversionRate} tableSortBy={tableSortBy} />
           ) : (
             <div style={{ padding: "40px", textAlign: "center", background: "#fff", borderRadius: "16px", border: "2px dashed #cbd5e1", color: "#94a3b8" }}>
               <span style={{ fontSize: "30px", display: "block", marginBottom: "10px" }}>🎉</span>
@@ -654,7 +704,7 @@ export default function AccountManagement({ setCurrentView }) {
                 
                 <div style={{ padding: "20px" }}>
                   {groupAccounts.length > 0 ? (
-                    <AccountTable filteredAccounts={groupAccounts} updateAccountObject={updateAccountObject} allManagers={allManagers} allClients={allClients} allCoAdminNames={allCoAdminNames} conversionRate={conversionRate} tableSortBy={tableSortBy} />
+                    <AccountTable filteredAccounts={groupAccounts} updateAccountObject={updateAccountObject} allManagers={allManagers} allClients={allClients} allCompanies={allCompanies} allCoAdminNames={allCoAdminNames} conversionRate={conversionRate} tableSortBy={tableSortBy} />
                   ) : (
                     <div style={{ padding: "40px", textAlign: "center", background: "#f8fafc", borderRadius: "12px", color: "#94a3b8", border: "1px dashed #cbd5e1" }}>
                       <span style={{ fontWeight: "600" }}>No accounts assigned to this manager yet.</span>

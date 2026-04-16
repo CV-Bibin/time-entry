@@ -5,6 +5,7 @@ import RatersPerformance from './components/RatersPerformance';
 import AccountManagement from './components/AccountManagement';
 import Earnings from './components/Earnings.jsx'; 
 import TeamPerformanceGraphs from './components/TeamPerformanceGraphs';
+import PayoutLedger from './components/PayoutLedger'; // 🚀 IMPORT NEW PAYOUT COMPONENT
 
 import { useState, useEffect } from 'react';
 import { 
@@ -200,7 +201,7 @@ function App() {
   const isAdmin = myRole === 'admin';
 
   // 🎨 DYNAMIC BACKGROUND THEME COLORS BASED ON ROLE
-  let appThemeBg = "#fffdff"; // Default Rater Theme (Light Slate)
+  let appThemeBg = "#f8fafc"; // Default Rater Theme (Light Slate)
   if (myRole === 'leader') appThemeBg = "#f5f3ff"; // Leader Theme (Light Purple)
   if (isCoAdmin) appThemeBg = "#f0fdf4"; // Co-Admin / Admin Theme (Light Emerald)
 
@@ -227,12 +228,14 @@ function App() {
         
         {/* RIGHT SIDE CONDITIONAL LAYOUT */}
         {isCoAdmin ? (
-          // 🚀 CO-ADMIN / ADMIN LAYOUT: STACKED (Accounts Top, Navigation Bottom)
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '12px', flex: 1 }}>
+          // 🚀 CO-ADMIN / ADMIN LAYOUT: STACKED (Account Actions Top Right, Navigation Bottom Right)
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'flex-end', gap: '12px', marginLeft: 'auto' }}>
             
             {/* Top Row: Account Settings & Log Out */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'nowrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '15px', flexWrap: 'nowrap' }}>
               <span style={{ fontSize: '14px', color: '#475569', fontWeight: '600' }}>{user.email}</span>
+
+              
               
               <button 
                 onClick={() => setIsPwdModalOpen(true)} 
@@ -250,7 +253,7 @@ function App() {
             </div>
 
             {/* Bottom Row: Page Navigation */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <button 
                 onClick={() => setCurrentView('dashboard')} 
                 style={{ padding: '8px 14px', cursor: 'pointer', border: 'none', borderRadius: '6px', background: currentView === 'dashboard' ? '#3b82f6' : '#f1f5f9', color: currentView === 'dashboard' ? 'white' : '#475569', fontWeight: 'bold', transition: '0.2s', whiteSpace: 'nowrap' }}
@@ -279,6 +282,13 @@ function App() {
                 💼 Agency Finances
               </button>
 
+              <button 
+                onClick={() => setCurrentView('payoutLedger')} 
+                style={{ padding: '8px 14px', cursor: 'pointer', border: 'none', borderRadius: '6px', background: currentView === 'payoutLedger' ? '#d97706' : '#fef3c7', color: currentView === 'payoutLedger' ? 'white' : '#b45309', fontWeight: 'bold', transition: '0.2s', whiteSpace: 'nowrap' }}
+              >
+                🏦 Payout Ledger
+              </button>
+
               {isAdmin && (
                 <button 
                   onClick={() => setCurrentView('admin')} 
@@ -295,7 +305,7 @@ function App() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '20px', flexWrap: 'wrap', flex: 1 }}>
             
             {/* Nav Buttons Group */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <button 
                 onClick={() => setCurrentView('dashboard')} 
                 style={{ padding: '8px 14px', cursor: 'pointer', border: 'none', borderRadius: '6px', background: currentView === 'dashboard' ? '#3b82f6' : '#f1f5f9', color: currentView === 'dashboard' ? 'white' : '#475569', fontWeight: 'bold', transition: '0.2s', whiteSpace: 'nowrap' }}
@@ -324,7 +334,7 @@ function App() {
             <div style={{ width: '2px', height: '30px', backgroundColor: '#cbd5e1', display: window.innerWidth > 768 ? 'block' : 'none' }}></div>
 
             {/* Account Actions Group */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'nowrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'nowrap' }}>
               <span style={{ fontSize: '14px', color: '#475569', fontWeight: '600' }}>{user.email}</span>
               
               <button 
@@ -353,6 +363,8 @@ function App() {
         {currentView === 'teamGraphs' && isManager && <TeamPerformanceGraphs user={user} setCurrentView={setCurrentView} />}
         {currentView === 'accountManagement' && isCoAdmin && <AccountManagement setCurrentView={setCurrentView} currentUser={user} myRole={myRole} />}
         {currentView === 'admin' && isAdmin && <AdminPanel setCurrentView={setCurrentView} currentUser={user} myRole={myRole} />}
+        {/* 🚀 ADDED THE ROUTE FOR THE NEW COMPONENT */}
+        {currentView === 'payoutLedger' && isCoAdmin && <PayoutLedger user={user} />}
       </main>
 
       {/* SMART PASSWORD MODAL */}
